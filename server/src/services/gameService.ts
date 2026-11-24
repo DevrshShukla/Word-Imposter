@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { GameModel, IGame } from '../models/Game.js';
 import { RoomModel } from '../models/Room.js';
 import { PlayerModel } from '../models/Player.js';
@@ -16,12 +17,16 @@ export class GameService {
   /**
    * Start a new game in a room
    */
-  public static async startGame(roomId: string, hostPlayerId: string): Promise<{
+  public static async startGame(roomIdOrCode: string, hostPlayerId: string): Promise<{
     game: PublicGameDTO;
     assignments: Map<string, RoleAssignment>;
   }> {
-    const room = await RoomModel.findById(roomId);
+    const room = mongoose.isValidObjectId(roomIdOrCode)
+      ? await RoomModel.findById(roomIdOrCode)
+      : await RoomModel.findOne({ code: roomIdOrCode.trim().toUpperCase() });
     if (!room) throw new Error('Room not found');
+
+    const roomId = room._id.toString();
 
     if (room.hostPlayerId !== hostPlayerId) {
       throw new Error('Only the room Host can start the game');
@@ -431,18 +436,20 @@ export class GameService {
   /**
    * Start a Rematch (Host only, between-game or completed state)
    */
-  public static async rematch(roomId: string, hostPlayerId: string): Promise<{
+  public static async rematch(roomIdOrCode: string, hostPlayerId: string): Promise<{
     game: PublicGameDTO;
     assignments: Map<string, RoleAssignment>;
   }> {
-    const room = await RoomModel.findById(roomId);
+    const room = mongoose.isValidObjectId(roomIdOrCode)
+      ? await RoomModel.findById(roomIdOrCode)
+      : await RoomModel.findOne({ code: roomIdOrCode.trim().toUpperCase() });
     if (!room) throw new Error('Room not found');
 
     if (room.hostPlayerId !== hostPlayerId) {
       throw new Error('Only the room Host can initiate a rematch');
     }
 
-    return this.startGame(roomId, hostPlayerId);
+    return this.startGame(room._id.toString(), hostPlayerId);
   }
 
   /**

@@ -1,8 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { parse } from 'csv-parse/sync';
 import { WordPairModel } from '../models/WordPair.js';
 import { connectDatabase, disconnectDatabase } from '../utils/database.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface CSVRow {
   id: string;
@@ -162,11 +166,39 @@ export async function importWordPairsFromCSV(filePath: string): Promise<{
   return { totalRead: records.length, accepted, rejected, reasons };
 }
 
+/**
+ * Robustly find the dataset CSV file across various execution environments
+ */
+export function resolveDatasetPath(): string | null {
+  const candidates = [
+    process.env.DATASET_PATH,
+    path.resolve(process.cwd(), 'imposter_game_dataset_1500.csv'),
+    path.resolve(process.cwd(), '../imposter_game_dataset_1500.csv'),
+    path.resolve(__dirname, '../../imposter_game_dataset_1500.csv'),
+    path.resolve(__dirname, '../../../imposter_game_dataset_1500.csv'),
+    path.resolve(__dirname, '../data/imposter_game_dataset_1500.csv'),
+    path.resolve(__dirname, '../../data/imposter_game_dataset_1500.csv'),
+  ].filter((p): p is string => Boolean(p && p.trim() !== ''));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 // Standalone seed runner
 async function run() {
   try {
     await connectDatabase();
-    const csvPath = path.resolve(process.cwd(), '../imposter_game_dataset_1500.csv');
+    const csvPath = resolveDatasetPath();
+    if (!csvPath) {
+      throw new Error(
+        'Could not locate imposter_game_dataset_1500.csv. Please verify file exists or set DATASET_PATH.'
+      );
+    }
     const result = await importWordPairsFromCSV(csvPath);
     console.log('Seed completed successfully:', result);
     process.exit(0);

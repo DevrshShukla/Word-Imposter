@@ -14,12 +14,15 @@ class SocketService {
       this.socket.disconnect();
     }
 
-    this.socket = io({
+    const socketUrl = import.meta.env.VITE_SOCKET_URL;
+    const socketOptions = {
       auth: { token },
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 1000,
-    });
+    };
+
+    this.socket = socketUrl ? io(socketUrl, socketOptions) : io(socketOptions);
 
     this.setupListeners();
     return this.socket;

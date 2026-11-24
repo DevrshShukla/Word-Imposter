@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { RoomModel, IRoom } from '../models/Room.js';
 import { PlayerModel, IPlayer } from '../models/Player.js';
 import { PublicPlayerDTO, PublicRoomDTO, RoomSettings } from '../types/game.types.js';
@@ -276,12 +277,19 @@ export class RoomService {
 
   /**
    * Safe public room snapshot (contains no private game secrets)
+   * Resolves by either MongoDB ObjectId or 6-character room code
    */
-  public static async getPublicRoomSnapshot(roomId: string): Promise<PublicRoomDTO> {
-    const room = await RoomModel.findById(roomId);
+  public static async getPublicRoomSnapshot(roomIdOrCode: string): Promise<PublicRoomDTO> {
+    let room: IRoom | null = null;
+    if (mongoose.isValidObjectId(roomIdOrCode)) {
+      room = await RoomModel.findById(roomIdOrCode);
+    }
+    if (!room) {
+      room = await RoomModel.findOne({ code: roomIdOrCode.trim().toUpperCase() });
+    }
     if (!room) throw new Error('Room not found');
 
-    const players = await PlayerModel.find({ roomId }).sort({ joinedAt: 1 });
+    const players = await PlayerModel.find({ roomId: room._id.toString() }).sort({ joinedAt: 1 });
 
     const publicPlayers: PublicPlayerDTO[] = players.map((p) => ({
       id: p._id.toString(),
@@ -304,8 +312,15 @@ export class RoomService {
 
   /**
    * Cumulative leaderboard
+   * Resolves by either MongoDB ObjectId or 6-character room code
    */
-  public static async getLeaderboard(roomId: string) {
+  public static async getLeaderboard(roomIdOrCode: string) {
+    let roomId = roomIdOrCode;
+    if (!mongoose.isValidObjectId(roomIdOrCode)) {
+      const room = await RoomModel.findOne({ code: roomIdOrCode.trim().toUpperCase() });
+      if (!room) throw new Error('Room not found');
+      roomId = room._id.toString();
+    }
     const players = await PlayerModel.find({ roomId }).sort({ cumulativeScore: -1, joinedAt: 1 });
     return players.map((p) => ({
       playerId: p._id.toString(),

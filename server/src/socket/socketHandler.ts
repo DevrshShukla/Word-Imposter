@@ -3,7 +3,6 @@ import { verifySessionToken, SessionPayload } from '../utils/token.js';
 import { RoomService } from '../services/roomService.js';
 import { GameService } from '../services/gameService.js';
 import { PlayerModel } from '../models/Player.js';
-import { RoomModel } from '../models/Room.js';
 
 interface AuthenticatedSocket extends Socket {
   session?: SessionPayload;
@@ -12,7 +11,10 @@ interface AuthenticatedSocket extends Socket {
 export function setupSocketHandlers(io: Server): void {
   // Authentication middleware for socket handshake
   io.use((socket: AuthenticatedSocket, next) => {
-    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.headers?.authorization?.replace('Bearer ', '');
+
     if (!token) {
       return next(new Error('Authentication token required'));
     }
@@ -43,16 +45,20 @@ export function setupSocketHandlers(io: Server): void {
 
     console.log(`Player connected: ${displayName} (${playerId}) in room ${roomId}`);
 
-    // Update connection status in DB
-    await PlayerModel.findByIdAndUpdate(playerId, {
-      connectionStatus: 'CONNECTED',
-      lastSeenAt: new Date(),
-    });
+    try {
+      // Update connection status in DB
+      await PlayerModel.findByIdAndUpdate(playerId, {
+        connectionStatus: 'CONNECTED',
+        lastSeenAt: new Date(),
+      });
 
-    // Notify room of player reconnection/join
-    io.to(roomChannel).emit('player:reconnected', { playerId, displayName, isHost });
-    const freshRoom = await RoomService.getPublicRoomSnapshot(roomId);
-    io.to(roomChannel).emit('room:updated', { room: freshRoom });
+      // Notify room of player reconnection/join
+      io.to(roomChannel).emit('player:reconnected', { playerId, displayName, isHost });
+      const freshRoom = await RoomService.getPublicRoomSnapshot(roomId);
+      io.to(roomChannel).emit('room:updated', { room: freshRoom });
+    } catch (err: any) {
+      console.warn('Error during socket connection handshake:', err.message);
+    }
 
     // Handle room:join (for explicit client re-sync)
     socket.on('room:join', async (_, callback) => {
@@ -64,9 +70,14 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle settings update
-    socket.on('game:settingsUpdate', async ({ settings }, callback) => {
+    // Handle settings update (Host only, Lobby only)
+    socket.on('game:settingsUpdate', async (data, callback) => {
       try {
+        const settings = data?.settings;
+        if (!settings || typeof settings !== 'object') {
+          throw new Error('Valid settings object is required');
+        }
+
         const updatedRoom = await RoomService.updateSettings(roomId, playerId, settings);
         io.to(roomChannel).emit('game:settingsUpdated', { settings: updatedRoom.settings });
         io.to(roomChannel).emit('room:updated', { room: updatedRoom });
@@ -77,9 +88,14 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle player rename
-    socket.on('player:rename', async ({ newDisplayName }, callback) => {
+    // Handle player rename (Lobby only)
+    socket.on('player:rename', async (data, callback) => {
       try {
+        const newDisplayName = data?.newDisplayName;
+        if (!newDisplayName || typeof newDisplayName !== 'string' || !newDisplayName.trim()) {
+          throw new Error('Valid display name is required');
+        }
+
         const updatedPlayer = await RoomService.renamePlayer(roomId, playerId, newDisplayName);
         io.to(roomChannel).emit('player:renamed', { player: updatedPlayer });
         const updatedRoom = await RoomService.getPublicRoomSnapshot(roomId);
@@ -91,7 +107,7 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle game:start
+    // Handle game:start (Host only, Lobby only)
     socket.on('game:start', async (_, callback) => {
       try {
         const { game, assignments } = await GameService.startGame(roomId, playerId);
@@ -118,8 +134,13 @@ export function setupSocketHandlers(io: Server): void {
     });
 
     // Handle transition from reveal to speaking
-    socket.on('game:proceedToSpeaking', async ({ gameId }, callback) => {
+    socket.on('game:proceedToSpeaking', async (data, callback) => {
       try {
+        const gameId = data?.gameId;
+        if (!gameId || typeof gameId !== 'string') {
+          throw new Error('Valid gameId is required');
+        }
+
         const game = await GameService.proceedToSpeaking(gameId);
         io.to(roomChannel).emit('speaking:turnStarted', {
           currentSpeakerId: game.currentSpeakerId,
@@ -132,9 +153,14 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle speaking:mark
-    socket.on('speaking:mark', async ({ gameId }, callback) => {
+    // Handle speaking:mark (Active non-eliminated players only)
+    socket.on('speaking:mark', async (data, callback) => {
       try {
+        const gameId = data?.gameId;
+        if (!gameId || typeof gameId !== 'string') {
+          throw new Error('Valid gameId is required');
+        }
+
         const updatedGame = await GameService.markSpoken(gameId, playerId);
 
         io.to(roomChannel).emit('speaking:marked', {
@@ -155,9 +181,14 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle voting:start
-    socket.on('voting:start', async ({ gameId }, callback) => {
+    // Handle voting:start (Host only, Discussion phase only)
+    socket.on('voting:start', async (data, callback) => {
       try {
+        const gameId = data?.gameId;
+        if (!gameId || typeof gameId !== 'string') {
+          throw new Error('Valid gameId is required');
+        }
+
         const updatedGame = await GameService.startVoting(gameId, playerId);
         io.to(roomChannel).emit('voting:started', { game: updatedGame });
         if (callback) callback({ success: true, game: updatedGame });
@@ -167,10 +198,21 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle voting:submit
-    socket.on('voting:submit', async ({ gameId, targetPlayerId }, callback) => {
+    // Handle voting:submit (Active non-eliminated players only)
+    socket.on('voting:submit', async (data, callback) => {
       try {
-        const { game, isComplete, results } = await GameService.submitVote(gameId, playerId, targetPlayerId);
+        const gameId = data?.gameId;
+        const targetPlayerId = data?.targetPlayerId;
+
+        if (!gameId || typeof gameId !== 'string' || !targetPlayerId || typeof targetPlayerId !== 'string') {
+          throw new Error('Valid gameId and targetPlayerId are required');
+        }
+
+        const { game, isComplete, results } = await GameService.submitVote(
+          gameId,
+          playerId,
+          targetPlayerId
+        );
 
         // Broadcast progress safely WITHOUT disclosing target
         io.to(roomChannel).emit('vote:submitted', {
@@ -212,8 +254,13 @@ export function setupSocketHandlers(io: Server): void {
     });
 
     // Handle next round (after vote results if no winner)
-    socket.on('game:nextRound', async ({ gameId }, callback) => {
+    socket.on('game:nextRound', async (data, callback) => {
       try {
+        const gameId = data?.gameId;
+        if (!gameId || typeof gameId !== 'string') {
+          throw new Error('Valid gameId is required');
+        }
+
         const game = await GameService.nextRound(gameId);
         io.to(roomChannel).emit('speaking:turnStarted', {
           currentSpeakerId: game.currentSpeakerId,
@@ -226,7 +273,7 @@ export function setupSocketHandlers(io: Server): void {
       }
     });
 
-    // Handle rematch
+    // Handle rematch (Host only)
     socket.on('game:rematch', async (_, callback) => {
       try {
         const { game, assignments } = await GameService.rematch(roomId, playerId);
@@ -255,13 +302,17 @@ export function setupSocketHandlers(io: Server): void {
     // Handle disconnect
     socket.on('disconnect', async () => {
       console.log(`Player disconnected: ${displayName} (${playerId})`);
-      await PlayerModel.findByIdAndUpdate(playerId, {
-        connectionStatus: 'DISCONNECTED',
-        lastSeenAt: new Date(),
-      });
-      io.to(roomChannel).emit('player:left', { playerId, displayName });
-      const updatedRoom = await RoomService.getPublicRoomSnapshot(roomId);
-      io.to(roomChannel).emit('room:updated', { room: updatedRoom });
+      try {
+        await PlayerModel.findByIdAndUpdate(playerId, {
+          connectionStatus: 'DISCONNECTED',
+          lastSeenAt: new Date(),
+        });
+        io.to(roomChannel).emit('player:left', { playerId, displayName });
+        const updatedRoom = await RoomService.getPublicRoomSnapshot(roomId);
+        io.to(roomChannel).emit('room:updated', { room: updatedRoom });
+      } catch (err: any) {
+        console.warn('Disconnect cleanup non-fatal error:', err.message);
+      }
     });
   });
 }
