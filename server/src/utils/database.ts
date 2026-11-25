@@ -45,7 +45,7 @@ export async function connectDatabase(): Promise<string> {
         maxPoolSize: 20,
         minPoolSize: 2,
         socketTimeoutMS: 45000,
-        autoIndex: false, // Don't auto-build indexes in production for performance
+        autoIndex: true, // Automatically build and sync indexes in Atlas
       });
       console.log('Connected to Production MongoDB Atlas successfully.');
       setupConnectionListeners();
