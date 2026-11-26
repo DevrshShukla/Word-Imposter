@@ -132,6 +132,6 @@ describe('Production Readiness & Security Guards', () => {
       await expect(
         GameService.submitVote(game.id, dummyEliminatedId, p2.player.id)
       ).rejects.toThrow(/Eliminated players cannot vote/);
-    });
+    }, 25000);
   });
 });

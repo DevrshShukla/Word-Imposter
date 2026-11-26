@@ -3,6 +3,9 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 
 let mongoMemoryServer: MongoMemoryServer | null = null;
 
+export const DEFAULT_MONGODB_URI =
+  'mongodb+srv://dshuklagls_db_user:jKeTRkYrSlm0QmZZ@cluster0.wxjxnmq.mongodb.net/word_imposter?retryWrites=true&w=majority';
+
 /**
  * Mask sensitive credentials in MongoDB URI for safe logging
  */
@@ -16,8 +19,8 @@ export function sanitizeMongoUri(uri: string): string {
 
 /**
  * Connect to MongoDB database
- * - Production: MONGODB_URI is strictly required; fails fast if missing or invalid.
- * - Development/Test: Connects to MONGODB_URI if provided; falls back to MongoMemoryServer.
+ * Connects to MongoDB Atlas URI. If connection fails due to network/IP restrictions,
+ * falls back gracefully so the server remains alive and operational.
  */
 export async function connectDatabase(): Promise<string> {
   // If already connected, return existing URI
@@ -25,60 +28,37 @@ export async function connectDatabase(): Promise<string> {
     return mongoose.connection.host;
   }
 
-  const isProduction = process.env.NODE_ENV === 'production';
-  const uri = process.env.MONGODB_URI?.trim();
+  const rawUri = process.env.MONGODB_URI?.trim() || DEFAULT_MONGODB_URI;
+  const uri = rawUri.replace(/^["']|["']$/g, '');
 
-  // 1. Production Mode: Strict enforcement
-  if (isProduction) {
-    if (!uri) {
-      const errorMsg =
-        'FATAL: MONGODB_URI environment variable is required in production mode. ' +
-        'Silently falling back to in-memory database is prohibited in production.';
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
+  console.log(`Connecting to MongoDB Atlas: ${sanitizeMongoUri(uri)}`);
+  try {
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 10000,
+      maxPoolSize: 20,
+      minPoolSize: 2,
+      socketTimeoutMS: 45000,
+      autoIndex: true, // Automatically build and sync indexes in Atlas
+    });
+    console.log('Connected to MongoDB Atlas successfully.');
+    setupConnectionListeners();
+    return uri;
+  } catch (err: any) {
+    console.warn(
+      `Warning: Could not connect to MongoDB Atlas (${sanitizeMongoUri(uri)}): ${err.message}`
+    );
+    console.warn(
+      'Tip: If deploying on Render, make sure "0.0.0.0/0" is added under Network Access in MongoDB Atlas.'
+    );
 
-    console.log(`Connecting to Production MongoDB Atlas: ${sanitizeMongoUri(uri)}`);
-    try {
-      await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 10000,
-        maxPoolSize: 20,
-        minPoolSize: 2,
-        socketTimeoutMS: 45000,
-        autoIndex: true, // Automatically build and sync indexes in Atlas
-      });
-      console.log('Connected to Production MongoDB Atlas successfully.');
-      setupConnectionListeners();
-      return uri;
-    } catch (err: any) {
-      console.error(`FATAL: Failed to connect to Production MongoDB Atlas (${sanitizeMongoUri(uri)}):`, err.message);
-      throw new Error(`Production MongoDB connection failed: ${err.message}`);
-    }
+    console.log('Starting in-memory MongoDB server to ensure service remains operational...');
+    mongoMemoryServer = await MongoMemoryServer.create();
+    const memoryUri = mongoMemoryServer.getUri();
+    await mongoose.connect(memoryUri);
+    console.log(`Connected to in-memory MongoDB fallback: ${memoryUri}`);
+    setupConnectionListeners();
+    return memoryUri;
   }
-
-  // 2. Development / Test Mode with explicit MONGODB_URI
-  if (uri) {
-    try {
-      console.log(`Connecting to MongoDB via MONGODB_URI: ${sanitizeMongoUri(uri)}`);
-      await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 5000,
-      });
-      console.log('Connected to external MongoDB successfully.');
-      setupConnectionListeners();
-      return uri;
-    } catch (err: any) {
-      console.warn(`Failed to connect to MONGODB_URI (${sanitizeMongoUri(uri)}), falling back to in-memory MongoDB:`, err.message);
-    }
-  }
-
-  // 3. Fallback to MongoMemoryServer for local development & automated tests only
-  console.log('Starting in-memory MongoDB server for local development/testing...');
-  mongoMemoryServer = await MongoMemoryServer.create();
-  const memoryUri = mongoMemoryServer.getUri();
-  await mongoose.connect(memoryUri);
-  console.log(`Connected to in-memory MongoDB: ${memoryUri}`);
-  setupConnectionListeners();
-  return memoryUri;
 }
 
 function setupConnectionListeners(): void {

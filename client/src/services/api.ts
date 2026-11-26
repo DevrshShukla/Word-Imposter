@@ -1,7 +1,16 @@
 import { PublicRoomDTO, PublicPlayerDTO, PrivateAssignmentDTO, LeaderboardEntryDTO } from '../types/game.types';
 
-// Use environment variable if provided; otherwise fallback to relative /api/v1 for unified deployment
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
+// Smart API base resolver: handles trailing slashes, missing /api/v1, or empty env
+function getApiBase(): string {
+  const envUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (envUrl && envUrl !== '') {
+    const clean = envUrl.replace(/\/+$/, '');
+    return clean.endsWith('/api/v1') ? clean : `${clean}/api/v1`;
+  }
+  return '/api/v1';
+}
+
+const API_BASE = getApiBase();
 
 export class ApiService {
   private static getHeaders(token?: string | null): Record<string, string> {

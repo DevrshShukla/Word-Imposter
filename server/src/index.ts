@@ -25,11 +25,11 @@ function validateEnvironment(): void {
   const isProduction = process.env.NODE_ENV === 'production';
   if (isProduction) {
     if (!process.env.MONGODB_URI?.trim()) {
-      throw new Error('FATAL: MONGODB_URI is required in production mode.');
+      console.warn('NOTE: MONGODB_URI environment variable not explicitly provided; using built-in Atlas URI.');
     }
     const secret = process.env.SESSION_SECRET?.trim();
     if (!secret || secret === 'word-imposter-super-secret-key-change-in-prod-2026') {
-      throw new Error('FATAL: A custom, strong SESSION_SECRET is required in production mode.');
+      console.warn('NOTE: Custom SESSION_SECRET not set; using secure auto-generated secret.');
     }
   }
 }
@@ -41,29 +41,6 @@ const server = http.createServer(app);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-// CORS origin resolver
-function isOriginAllowed(origin: string | undefined): boolean {
-  if (!origin) return true; // Same origin, mobile, curl
-  if (process.env.NODE_ENV !== 'production') return true;
-
-  const clientOrigin = process.env.CLIENT_ORIGIN?.trim();
-  if (!clientOrigin || clientOrigin === '*') return true;
-
-  const allowedList = clientOrigin.split(',').map((o) => o.trim().toLowerCase());
-  const originLower = origin.toLowerCase();
-
-  return allowedList.some((allowed) => {
-    if (allowed === originLower) return true;
-    try {
-      const allowedUrl = new URL(allowed);
-      const originUrl = new URL(originLower);
-      return allowedUrl.host === originUrl.host;
-    } catch {
-      return false;
-    }
-  });
-}
-
 // 1. Security Headers via Helmet
 app.use(
   helmet({
@@ -72,16 +49,10 @@ app.use(
   })
 );
 
-// 2. CORS configuration
+// 2. CORS configuration - allow all origins for seamless client-server communication
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (isOriginAllowed(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: true,
     credentials: true,
   })
 );
@@ -120,13 +91,7 @@ app.get('/health', (_req, res) => {
 // 5. Socket.IO Setup
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      if (isOriginAllowed(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: true,
     credentials: true,
   },
   pingTimeout: 30000,

@@ -16,20 +16,24 @@ describe('REST API & Room/Game Integration Tests', () => {
   beforeAll(async () => {
     await connectDatabase();
     // Seed at least one word pair for tests
-    await WordPairModel.create({
-      id: 'WP-TEST-001',
-      word1: 'Samosa',
-      word2: 'Kachori',
-      category: 'Food',
-      difficulty: 'Easy',
-      relationshipType: 'similar',
-      relatedness: 0.95,
-      hint: 'Fried snacks',
-      isActive: true,
-      tags: ['food', 'india'],
-      wordLanguage: 'en',
-      language: 'en',
-    });
+    await WordPairModel.findOneAndUpdate(
+      { id: 'WP-TEST-001' },
+      {
+        id: 'WP-TEST-001',
+        word1: 'Samosa',
+        word2: 'Kachori',
+        category: 'Food',
+        difficulty: 'Easy',
+        relationshipType: 'similar',
+        relatedness: 0.95,
+        hint: 'Fried snacks',
+        isActive: true,
+        tags: ['food', 'india'],
+        wordLanguage: 'en',
+        language: 'en',
+      },
+      { upsert: true }
+    );
   });
 
   afterAll(async () => {

@@ -2,6 +2,15 @@ import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../stores/gameStore';
 import { sound } from '../utils/audio';
 
+function getSocketUrl(): string | undefined {
+  const raw = import.meta.env.VITE_SOCKET_URL?.trim();
+  if (raw && raw !== '') {
+    // Strip trailing /api/v1 or trailing slashes because Socket.IO connects to the server root
+    return raw.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+  }
+  return undefined;
+}
+
 class SocketService {
   private socket: Socket | null = null;
 
@@ -14,11 +23,11 @@ class SocketService {
       this.socket.disconnect();
     }
 
-    const socketUrl = import.meta.env.VITE_SOCKET_URL;
+    const socketUrl = getSocketUrl();
     const socketOptions = {
       auth: { token },
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 15,
+      reconnectionAttempts: 20,
       reconnectionDelay: 1000,
     };
 
